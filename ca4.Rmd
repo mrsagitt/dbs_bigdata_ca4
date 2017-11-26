@@ -1,0 +1,155 @@
+---
+title: "CA4 - working with log file"
+author: "Dominik Hemzaczek, 10360024"
+date: "November 2017"
+output: html_document
+---
+    
+```{r setup, include=FALSE}
+    library(knitr)
+    if(!require("ggplot2")) install.library("ggplot2") # visualization
+    if(!require("tidyverse")) install.library("tidyverse") # tidy data
+    if(!require("lubridate")) install.library("lubridate") # date & time handling
+    knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r, init}
+    # set your working directory
+    setwd('C:/DBS/BigData/ca4')
+    df <- read.csv('commits.csv', header = TRUE, sep = ",")
+```
+
+# Objective  
+
+Analyse 422 objects that are in a list and come up with 3 interesting statistical pieces of information for this dataset with supporting evidence of 'interestingness'.
+  
+### Introduction  
+
+Current dataset comes from transformed .log file. File contains information about commit / revision number, user name, time stamp and number of commented lines. Also, files / path that have been either modified, added or deleted.  
+File was processed in Python using pandas dataframe and then saved as CSV file.  
+
+#### Dataset at glance
+
+Let's see what is in this dataframe:
+```{r t2}
+    str(df)
+```
+
+Looking at dimmensions of dataframe `df` we can see that there are 422 observations - looks like file processing in Python was done correctly.
+Full explanation of variables below:  
+  
+  
+Variable Name  | Description  
+---------------|----------------------  
+add            | Number of added files / paths  
+comments       | Number of lines with comments  
+commit         | Unique revision number  
+delete         | Number of deleted files / paths  
+date_time      | Date and time   
+modify         | Number of modified files / paths  
+user           | User name  
+
+
+#### Exploration
+  
+  
+```{r plot1, fig.height=4, fig.width=10}
+    library(ggplot2)
+    ggplot(data = df) + 
+        geom_bar(mapping = aes(x = user)) + 
+        labs(title = "Revisions by user\n", y = "amount of revisions", x = "users") +
+        coord_flip()
+```
+
+The above chart shows amount of revision per each of user and it reveals some interesting information that I'm going to explore further:  
+* users `Thomas` and `Jimmy` logged far more revisions than any other users,  
+* last user looks like an automated log  
+  
+  
+#### Tidying data
+Presented dataframe is 'wide' (not in 3NF) form and for convenience of further plotting we might want to convert it to 'long' table using `tidyverse` packgage. We are going to 'stack' variables `add`, `modify` and `delete` into new column `task` and their rescpective values into another column - `qty`, all into new dataframe `df2`.  
+  
+  
+```{r tid1, echo=FALSE}
+    library(tidyverse)
+    df2 <- df %>%
+    gather(add,modify,delete, key="task", value = "qty")
+```
+
+```{r tid2, echo=TRUE}
+    dim(df2)
+```
+  
+  
+New dataframe has less columns but far more rows (3 times 422 as we stacked three columns in the top of each other). I'd like to delete zero values as they have no meaning / importance in this dataset:
+
+```{r tid3, echo=TRUE}
+    df2 <- filter(df2, qty != 0)
+    dim(df2)
+```
+  
+  
+After these steps we can improve previous graph by showing `task` participation.
+  
+```{r plot2, fig.height=4, fig.width=10}
+    library(ggplot2)
+    ggplot(data = df2) + 
+        geom_bar(mapping = aes(x = user, fill = task)) + 
+        labs(title = "Revisions by user\n", y = "count of revisions", x = "users") +
+        coord_flip()
+```
+
+  
+  
+#### Working with date & time
+
+Since both `Thomas` and `Jimmy` share vast majority of revisions, it would be good to see if there is any pattern around time of theirs revisions. In order to do this, we'd use information stored in `date_time` variable.  
+As `date_time` is stored as factor, it needs to be converted to date/time format first.  
+  
+```{r tid4, echo=TRUE}
+    library(lubridate)
+    df2$ctdate <- as.POSIXct(df2$date_time)
+```
+  
+  
+Below two charts explore relations between users and hour / weekday of their postings.
+
+```{r plot3, fig.height=4, fig.width=10}
+    ggplot(data = df2) + 
+        geom_point(mapping = aes(x = hour(df2$ctdate), y = user, color = task, size = qty))+
+        labs(title = "Hourly tasks by user \n", y = "user", x = "\nhours of posting")
+```
+
+
+```{r plot4, fig.height=4, fig.width=10}
+    ggplot(data = df2) + 
+        geom_point(mapping = aes(x = wday(df2$ctdate), y = user, color = task, size = qty))+
+        labs(title = "Daily tasks by user \n", y = "user", x = "\nday of week")
+```
+
+
+Above charts reveal additional interesting characteristics for users `Thomas` and `Jimmy`: they seems to be professionals, as they both post only within business hours and each day of the week. Apart from `Vincent`, no other user posts with the same regurality, however `Vincent` posts also outside business hours and there are some time slots where he doesn't post al all.  
+Interestingly, last user has intiguing name of `/OU=Domain Control...`. By name we could try to guess this user is not a human - let's see if there is any pattern within posted commits.
+
+
+```{r droid1, fig.height=4, fig.width=10}
+    usr <- "/OU=Domain Control Validated/CN=svn.company.net"
+    ggplot(data= filter(df2, user == usr)) +
+        geom_bar(mapping = aes(x=commit,  y=qty, fill = task), stat = "sum") +
+        labs(title = "User /OU=Domain Control Validated/CN=svn.company.net" , x = "commit", y = "\nsum of tasks") +
+        coord_flip()
+
+```
+  
+  
+There is a clear pattern for user `/OU=Domain Control Validated/CN=svn.company.net`:  
+* no other tasks apart from modification of the file/path,  
+* there is always (withing current dataset) one and only one action per commit.  
+  
+ Given the above we could conclude that the above commits / revisions are not created by person.
+ 
+#### Final conclusions
+
+There are `r summarise(df2, tasks = sum(qty))[,1]` tasks logged in this dataframe performed between `r min(df2$ctdate)` and `r max(df2$ctdate)`. Majority of thses tasks are modification of existing files/paths.  
+Users `Jimmy` and `Thomas` seems to be professionals judging by day of week / hour of date pattern.  
+User `/OU=Domain Control Validated/CN=svn.company.net` is an automated action as it post only one modification per revision.  
